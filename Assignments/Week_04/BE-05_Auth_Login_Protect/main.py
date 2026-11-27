@@ -1,12 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials
 
 from schemas import AuthRequest
 from auth import signup_user, login_user
 from supabase_client import supabase
-
-bearer_scheme = HTTPBearer(auto_error=False)
-
+from dependencies import get_current_user, bearer_scheme
 
 
 app = FastAPI(
@@ -16,24 +14,15 @@ app = FastAPI(
 )
 
 
-# ---------------- HOME AND HEALTH ----------------
-
 @app.get("/")
 def home():
-    return {
-        "message": "Auth Login & Protect API is running"
-    }
+    return {"message": "Auth Login & Protect API is running"}
 
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-        "supabase": "client initialized"
-    }
+    return {"status": "healthy", "supabase": "client initialized"}
 
-
-# ---------------- SIGNUP ----------------
 
 @app.post("/auth/signup", status_code=201)
 def signup(data: AuthRequest):
@@ -58,8 +47,6 @@ def signup(data: AuthRequest):
             detail="Signup failed. Check your input or whether the email is already registered."
         )
 
-
-# ---------------- LOGIN ----------------
 
 @app.post("/auth/login")
 def login(data: AuthRequest):
@@ -95,7 +82,23 @@ def login(data: AuthRequest):
         )
 
 
-# ---------------- PUBLIC ROUTE ----------------
+@app.post("/auth/logout", status_code=204)
+def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    current_user=Depends(get_current_user)
+):
+    token = credentials.credentials
+
+    try:
+        supabase.auth.admin.sign_out(token, "local")
+        return
+
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Logout failed"
+        )
+
 
 @app.get("/public/info")
 def public_info():
@@ -105,47 +108,21 @@ def public_info():
     }
 
 
-# ---------------- PROTECTED ROUTE ----------------
-
 @app.get("/protected/profile")
-def protected_profile(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)
-):
-    # Step 1: Check whether the token was supplied
-    if credentials is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required"
-        )
+def protected_profile(current_user=Depends(get_current_user)):
+    return {
+        "message": "Authentication successful",
+        "user_id": current_user.id,
+        "email": current_user.email,
+        "authenticated": True
+    }
 
-    # Step 2: Extract the actual JWT
-    token = credentials.credentials
 
-    # Step 3: Ask Supabase to verify the token
-    try:
-        response = supabase.auth.get_user(token)
-
-        user = response.user
-
-        if user is None:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid or expired token"
-            )
-
-        # Step 4: Return authenticated user information
-        return {
-            "message": "Authentication successful",
-            "user_id": user.id,
-            "email": user.email,
-            "authenticated": True
-        }
-
-    except HTTPException:
-        raise
-
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token"
-        )
+@app.get("/protected/dashboard")
+def protected_dashboard(current_user=Depends(get_current_user)):
+    return {
+        "message": "Welcome to your protected dashboard",
+        "user_id": current_user.id,
+        "email": current_user.email,
+        "access": "Authorized user only"
+    }
